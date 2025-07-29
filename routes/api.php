@@ -41,8 +41,10 @@ Route::middleware('auth:sanctum')->group(function () {
         
         // Room Types
         Route::apiResource('room-types', \App\Http\Controllers\Api\RoomTypeController::class)
-            ->only(['index', 'show'])
-            ->middleware('permission:rooms.view');
+            ->middleware(['permission:rooms.view'])
+            ->except(['destroy']);
+        Route::delete('/room-types/{roomType}', [\App\Http\Controllers\Api\RoomTypeController::class, 'destroy'])
+            ->middleware('permission:rooms.edit');
         Route::get('/room-types/{roomType}/availability', [\App\Http\Controllers\Api\RoomTypeController::class, 'availability'])
             ->middleware('permission:rooms.view');
         
@@ -52,8 +54,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/rooms/statistics', [\App\Http\Controllers\Api\RoomController::class, 'statistics'])
             ->middleware('permission:dashboard.view');
         Route::apiResource('rooms', \App\Http\Controllers\Api\RoomController::class)
-            ->only(['index', 'show', 'update'])
-            ->middleware('permission:rooms.view');
+            ->middleware(['permission:rooms.view'])
+            ->except(['destroy']);
+        Route::delete('/rooms/{room}', [\App\Http\Controllers\Api\RoomController::class, 'destroy'])
+            ->middleware('permission:rooms.edit');
         
         // Guests
         Route::get('/guests/search', [\App\Http\Controllers\Api\GuestController::class, 'search'])

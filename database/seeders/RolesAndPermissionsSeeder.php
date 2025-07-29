@@ -48,7 +48,10 @@ class RolesAndPermissionsSeeder extends Seeder
         ];
 
         foreach ($roles as $roleData) {
-            Role::create($roleData);
+            Role::firstOrCreate(
+                ['name' => $roleData['name']],
+                $roleData
+            );
         }
 
         // Create Permissions
@@ -60,6 +63,7 @@ class RolesAndPermissionsSeeder extends Seeder
             ['name' => 'reservations.delete', 'display_name' => 'Supprimer les réservations', 'module' => 'hebergement'],
             
             ['name' => 'rooms.view', 'display_name' => 'Voir les chambres', 'module' => 'hebergement'],
+            ['name' => 'rooms.edit', 'display_name' => 'Gérer les chambres et types', 'module' => 'hebergement'],
             ['name' => 'rooms.manage_states', 'display_name' => 'Gérer les états des chambres', 'module' => 'hebergement'],
             ['name' => 'rooms.housekeeping', 'display_name' => 'Gérer le service de chambre', 'module' => 'hebergement'],
             
@@ -87,18 +91,21 @@ class RolesAndPermissionsSeeder extends Seeder
         ];
 
         foreach ($permissions as $permissionData) {
-            Permission::create($permissionData);
+            Permission::firstOrCreate(
+                ['name' => $permissionData['name']],
+                $permissionData
+            );
         }
 
         // Assign permissions to roles
         $adminRole = Role::where('name', 'admin')->first();
-        $adminRole->permissions()->attach(Permission::all());
+        $adminRole->permissions()->syncWithoutDetaching(Permission::all());
 
         $managerRole = Role::where('name', 'manager')->first();
-        $managerRole->permissions()->attach(
+        $managerRole->permissions()->syncWithoutDetaching(
             Permission::whereIn('name', [
                 'reservations.view', 'reservations.create', 'reservations.edit',
-                'rooms.view', 'rooms.manage_states',
+                'rooms.view', 'rooms.edit', 'rooms.manage_states',
                 'billing.view', 'billing.create', 'billing.edit',
                 'dashboard.view', 'reports.view', 'reports.export',
                 'restaurant.orders', 'restaurant.stock',
@@ -107,7 +114,7 @@ class RolesAndPermissionsSeeder extends Seeder
         );
 
         $receptionistRole = Role::where('name', 'receptionist')->first();
-        $receptionistRole->permissions()->attach(
+        $receptionistRole->permissions()->syncWithoutDetaching(
             Permission::whereIn('name', [
                 'reservations.view', 'reservations.create', 'reservations.edit',
                 'rooms.view', 'rooms.manage_states',
@@ -117,7 +124,7 @@ class RolesAndPermissionsSeeder extends Seeder
         );
 
         $housekeeperRole = Role::where('name', 'housekeeper')->first();
-        $housekeeperRole->permissions()->attach(
+        $housekeeperRole->permissions()->syncWithoutDetaching(
             Permission::whereIn('name', [
                 'rooms.view', 'rooms.housekeeping',
                 'dashboard.view'
@@ -125,7 +132,7 @@ class RolesAndPermissionsSeeder extends Seeder
         );
 
         $maintenanceRole = Role::where('name', 'maintenance')->first();
-        $maintenanceRole->permissions()->attach(
+        $maintenanceRole->permissions()->syncWithoutDetaching(
             Permission::whereIn('name', [
                 'rooms.view', 'rooms.manage_states',
                 'dashboard.view'
@@ -133,7 +140,7 @@ class RolesAndPermissionsSeeder extends Seeder
         );
 
         $restaurantRole = Role::where('name', 'restaurant')->first();
-        $restaurantRole->permissions()->attach(
+        $restaurantRole->permissions()->syncWithoutDetaching(
             Permission::whereIn('name', [
                 'restaurant.orders', 'restaurant.stock', 'restaurant.recipes',
                 'dashboard.view'

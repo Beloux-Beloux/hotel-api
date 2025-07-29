@@ -13,7 +13,7 @@ class RoomController extends Controller
      */
     public function index(Request $request)
     {
-        $query = Room::with('roomType');
+        $query = Room::with(['roomType', 'currentReservation.guest']);
 
         // Filter by status
         if ($request->has('status')) {
@@ -33,6 +33,33 @@ class RoomController extends Controller
         $rooms = $query->orderBy('number')->get();
 
         return response()->json($rooms);
+    }
+
+    /**
+     * Store a newly created resource in storage.
+     */
+    public function store(Request $request)
+    {
+        $request->validate([
+            'number' => 'required|string|unique:rooms,number,NULL,id,hotel_id,' . session('current_hotel_id'),
+            'floor' => 'required|integer|min:0',
+            'room_type_id' => 'required|exists:room_types,id',
+            'status' => 'sometimes|in:' . implode(',', array_keys(Room::getStatusOptions())),
+            'notes' => 'nullable|string|max:500',
+        ]);
+
+        $room = Room::create([
+            'hotel_id' => session('current_hotel_id'),
+            'number' => $request->number,
+            'floor' => $request->floor,
+            'room_type_id' => $request->room_type_id,
+            'status' => $request->status ?? 'libre_propre',
+            'notes' => $request->notes,
+        ]);
+
+        $room->load(['roomType', 'currentReservation.guest']);
+
+        return response()->json($room, 201);
     }
 
     /**
@@ -56,6 +83,9 @@ class RoomController extends Controller
         ]);
 
         $room->update($request->only(['status', 'notes']));
+        
+        // Recharger les relations après la mise à jour
+        $room->load(['roomType', 'currentReservation.guest']);
 
         return response()->json($room);
     }
@@ -108,5 +138,31 @@ class RoomController extends Controller
         ];
 
         return response()->json($stats);
+    }
+
+    /**
+     * Remove the specified resource from storage.
+     */
+    public function destroy(Room $room)
+    {
+        // Vérifier s'il y a des réservations en cours
+        if ($room->currentReservation) {
+            return response()->json([
+                'message' => 'Impossible de supprimer cette chambre car elle a une réservation en cours.'
+            ], 409);
+        }
+
+        // Vérifier s'il y a un historique de réservations
+        if ($room->reservations()->exists()) {
+            return response()->json([
+                'message' => 'Impossible de supprimer cette chambre car elle a un historique de réservations.'
+            ], 409);
+        }
+
+        $room->delete();
+
+        return response()->json([
+            'message' => 'Chambre supprimée avec succès.'
+        ]);
     }
 }

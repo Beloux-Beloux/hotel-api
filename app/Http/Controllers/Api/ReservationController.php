@@ -35,6 +35,11 @@ class ReservationController extends Controller
             $query->where('guest_id', $request->guest_id);
         }
 
+        // Filter by room
+        if ($request->has('room_id')) {
+            $query->where('room_id', $request->room_id);
+        }
+
         // Sorting
         $sortField = $request->get('sort_by', 'check_in_date');
         $sortDirection = $request->get('sort_direction', 'desc');
