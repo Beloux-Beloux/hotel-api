@@ -23,5 +23,38 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        $exceptions->render(function (\Throwable $e, $request) {
+            if ($request->is('api/*') || $request->expectsJson()) {
+                $status = 500;
+                $message = 'Une erreur est survenue';
+                
+                if ($e instanceof \Illuminate\Validation\ValidationException) {
+                    $status = 422;
+                    return response()->json([
+                        'message' => 'Erreur de validation',
+                        'errors' => $e->errors()
+                    ], $status);
+                }
+                
+                if ($e instanceof \Symfony\Component\HttpKernel\Exception\HttpException) {
+                    $status = $e->getStatusCode();
+                    $message = $e->getMessage() ?: 'Erreur HTTP';
+                }
+                
+                // En développement, afficher plus de détails
+                if (config('app.debug')) {
+                    return response()->json([
+                        'message' => $e->getMessage(),
+                        'exception' => get_class($e),
+                        'file' => $e->getFile(),
+                        'line' => $e->getLine(),
+                        'trace' => $e->getTrace()
+                    ], $status);
+                }
+                
+                return response()->json([
+                    'message' => $message
+                ], $status);
+            }
+        });
     })->create();

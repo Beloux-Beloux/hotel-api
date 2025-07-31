@@ -33,6 +33,13 @@ class AuthController extends Controller
             ]);
         }
 
+        // Check if email is verified
+        if (!$user->hasVerifiedEmail()) {
+            throw ValidationException::withMessages([
+                'email' => ['Veuillez vérifier votre adresse email avant de vous connecter.'],
+            ]);
+        }
+
         // Check access mode
         if ($request->access_type === 'internet' && !$user->canAccessFromInternet()) {
             throw ValidationException::withMessages([
@@ -75,7 +82,10 @@ class AuthController extends Controller
 
     public function user(Request $request)
     {
-        return response()->json($request->user()->load('roles.permissions'));
+        $user = $request->user();
+        $user->load(['roles.permissions', 'hotels']);
+        
+        return response()->json($user);
     }
 
     public function changePassword(Request $request)

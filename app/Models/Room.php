@@ -7,6 +7,8 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use App\Models\Traits\BelongsToHotel;
+use Illuminate\Support\Facades\Auth;
+use App\Services\WebSocketService;
 
 class Room extends Model
 {
@@ -53,6 +55,21 @@ class Room extends Model
             ->whereDate('check_out_date', '>=', now());
     }
 
+    public function statusHistory(): HasMany
+    {
+        return $this->hasMany(RoomStatusHistory::class)->orderBy('changed_at', 'desc');
+    }
+
+    public function notes(): HasMany
+    {
+        return $this->hasMany(RoomNote::class)->byPriority();
+    }
+
+    public function activeNotes(): HasMany
+    {
+        return $this->notes()->where('active', true);
+    }
+
     public function isAvailable($checkIn, $checkOut): bool
     {
         if (!in_array($this->status, [self::STATUS_LIBRE_PROPRE, self::STATUS_LIBRE_SALE])) {
@@ -97,5 +114,78 @@ class Room extends Model
             self::STATUS_RESERVEE => 'gray',
             default => 'gray',
         };
+    }
+
+    protected static function booted()
+    {
+        static::updating(function ($room) {
+            if ($room->isDirty('status') && Auth::check()) {
+                RoomStatusHistory::create([
+                    'hotel_id' => $room->hotel_id,
+                    'room_id' => $room->id,
+                    'previous_status' => $room->getOriginal('status'),
+                    'new_status' => $room->status,
+                    'changed_by' => Auth::id(),
+                    'changed_at' => now(),
+                ]);
+
+                // Notify via WebSocket
+                try {
+                    $websocket = app(WebSocketService::class);
+                    $websocket->notifyRoomStatusChange(
+                        $room->hotel_id,
+                        $room->load(['roomType', 'currentReservation.guest'])->toArray(),
+                        $room->getOriginal('status'),
+                        $room->status
+                    );
+                } catch (\Exception $e) {
+                    \Log::error('Failed to send WebSocket notification', ['error' => $e->getMessage()]);
+                }
+            }
+        });
+    }
+
+    public function getPriorityAttribute(): string
+    {
+        // Priorité urgente si note urgente
+        if ($this->activeNotes()->where('priority', 'urgent')->exists()) {
+            return 'urgent';
+        }
+
+        // Priorité haute si départ aujourd'hui
+        if ($this->currentReservation && $this->currentReservation->check_out_date->isToday()) {
+            return 'high';
+        }
+
+        // Priorité haute si arrivée prévue et chambre sale
+        $arrivalsToday = $this->reservations()
+            ->where('status', 'confirmee')
+            ->whereDate('check_in_date', today())
+            ->exists();
+            
+        if ($arrivalsToday && in_array($this->status, [self::STATUS_LIBRE_SALE, self::STATUS_OCCUPEE_SALE])) {
+            return 'high';
+        }
+
+        // Priorité normale par défaut
+        return 'normal';
+    }
+
+    /**
+     * Get the assignments for the room.
+     */
+    public function assignments()
+    {
+        return $this->hasMany(RoomAssignment::class);
+    }
+
+    /**
+     * Get today's assignment for the room.
+     */
+    public function todayAssignment()
+    {
+        return $this->hasOne(RoomAssignment::class)
+            ->where('assigned_date', today())
+            ->orderBy('assigned_at', 'desc');
     }
 }

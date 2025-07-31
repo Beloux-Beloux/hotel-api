@@ -4,10 +4,18 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Room;
+use App\Models\RoomNote;
 use Illuminate\Http\Request;
+use App\Services\WebSocketService;
 
 class RoomController extends Controller
 {
+    protected WebSocketService $websocket;
+
+    public function __construct(WebSocketService $websocket)
+    {
+        $this->websocket = $websocket;
+    }
     /**
      * Display a listing of the resource.
      */
@@ -164,5 +172,82 @@ class RoomController extends Controller
         return response()->json([
             'message' => 'Chambre supprimée avec succès.'
         ]);
+    }
+
+    /**
+     * Get room status history.
+     */
+    public function history(Room $room)
+    {
+        $history = $room->statusHistory()
+            ->with('user:id,name,email')
+            ->take(50)
+            ->get();
+
+        return response()->json($history);
+    }
+
+    /**
+     * Get room notes.
+     */
+    public function getNotes(Room $room)
+    {
+        $notes = $room->activeNotes()
+            ->with('user:id,name')
+            ->get();
+
+        return response()->json($notes);
+    }
+
+    /**
+     * Add a note to a room.
+     */
+    public function addNote(Request $request, Room $room)
+    {
+        $request->validate([
+            'note' => 'required|string|max:1000',
+            'priority' => 'sometimes|in:low,normal,high,urgent',
+            'expires_at' => 'sometimes|nullable|date|after:now',
+        ]);
+
+        $note = $room->notes()->create([
+            'hotel_id' => $room->hotel_id,
+            'note' => $request->note,
+            'priority' => $request->priority ?? 'normal',
+            'created_by' => auth()->id(),
+            'expires_at' => $request->expires_at,
+        ]);
+
+        $note->load('user:id,name');
+
+        // Notify via WebSocket
+        $this->websocket->notifyRoomNoteAdded(
+            $room->hotel_id,
+            $room->id,
+            $note->toArray()
+        );
+
+        return response()->json($note, 201);
+    }
+
+    /**
+     * Delete a room note.
+     */
+    public function deleteNote(Room $room, RoomNote $note)
+    {
+        if ($note->room_id !== $room->id) {
+            return response()->json(['message' => 'Note not found'], 404);
+        }
+
+        $note->update(['active' => false]);
+
+        // Notify via WebSocket
+        $this->websocket->notifyRoomNoteDeleted(
+            $room->hotel_id,
+            $room->id,
+            $note->id
+        );
+
+        return response()->json(['message' => 'Note supprimée avec succès']);
     }
 }

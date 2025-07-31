@@ -14,6 +14,7 @@ use App\Http\Controllers\Auth\AuthController;
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
 Route::post('/reset-password', [AuthController::class, 'resetPassword']);
+Route::post('/verify-email', [\App\Http\Controllers\Api\VerificationController::class, 'verifyApi']);
 
 // Protected routes
 Route::middleware('auth:sanctum')->group(function () {
@@ -59,6 +60,16 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/rooms/{room}', [\App\Http\Controllers\Api\RoomController::class, 'destroy'])
             ->middleware('permission:rooms.edit');
         
+        // Room history and notes
+        Route::get('/rooms/{room}/history', [\App\Http\Controllers\Api\RoomController::class, 'history'])
+            ->middleware('permission:rooms.view');
+        Route::get('/rooms/{room}/notes', [\App\Http\Controllers\Api\RoomController::class, 'getNotes'])
+            ->middleware('permission:rooms.view');
+        Route::post('/rooms/{room}/notes', [\App\Http\Controllers\Api\RoomController::class, 'addNote'])
+            ->middleware('permission:rooms.edit');
+        Route::delete('/rooms/{room}/notes/{note}', [\App\Http\Controllers\Api\RoomController::class, 'deleteNote'])
+            ->middleware('permission:rooms.edit');
+        
         // Guests
         Route::get('/guests/search', [\App\Http\Controllers\Api\GuestController::class, 'search'])
             ->middleware('permission:reservations.view');
@@ -82,5 +93,27 @@ Route::middleware('auth:sanctum')->group(function () {
             ->middleware('permission:reservations.edit');
         Route::post('/reservations/{reservation}/unarchive', [\App\Http\Controllers\Api\ReservationController::class, 'unarchive'])
             ->middleware('permission:reservations.edit');
+        
+        // Hotel users management
+        Route::get('/hotels/{hotel}/users', [\App\Http\Controllers\Api\HotelUserController::class, 'index']);
+        Route::get('/hotels/{hotel}/users/me/permissions', [\App\Http\Controllers\Api\HotelUserController::class, 'currentUserPermissions']);
+        Route::post('/hotels/{hotel}/users/invite', [\App\Http\Controllers\Api\HotelUserController::class, 'invite']);
+        Route::post('/hotels/{hotel}/users/create-staff', [\App\Http\Controllers\Api\HotelUserController::class, 'createStaff']);
+        Route::put('/hotels/{hotel}/users/{user}/role', [\App\Http\Controllers\Api\HotelUserController::class, 'updateRole']);
+        Route::delete('/hotels/{hotel}/users/{user}', [\App\Http\Controllers\Api\HotelUserController::class, 'remove']);
+        
+        // Housekeeping staff management
+        Route::apiResource('housekeeping-staff', \App\Http\Controllers\Api\HousekeepingStaffController::class);
+        Route::get('/housekeeping-staff/{staff}/statistics', [\App\Http\Controllers\Api\HousekeepingStaffController::class, 'statistics']);
+        
+        // Room assignments
+        Route::get('/assignments', [\App\Http\Controllers\Api\RoomAssignmentController::class, 'index']);
+        Route::post('/assignments/auto-assign', [\App\Http\Controllers\Api\RoomAssignmentController::class, 'autoAssign']);
+        Route::put('/assignments/{assignment}/reassign', [\App\Http\Controllers\Api\RoomAssignmentController::class, 'reassign']);
+        Route::post('/assignments/{assignment}/start', [\App\Http\Controllers\Api\RoomAssignmentController::class, 'start']);
+        Route::post('/assignments/{assignment}/complete', [\App\Http\Controllers\Api\RoomAssignmentController::class, 'complete']);
+        Route::post('/assignments/{assignment}/validate', [\App\Http\Controllers\Api\RoomAssignmentController::class, 'validate']);
+        Route::post('/assignments/{assignment}/report-issue', [\App\Http\Controllers\Api\RoomAssignmentController::class, 'reportIssue']);
+        Route::get('/assignments/my-assignments', [\App\Http\Controllers\Api\RoomAssignmentController::class, 'myAssignments']);
     });
 });
