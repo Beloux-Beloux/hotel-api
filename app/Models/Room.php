@@ -55,6 +55,14 @@ class Room extends Model
             ->whereDate('check_out_date', '>=', now());
     }
 
+    public function nextReservation()
+    {
+        return $this->hasOne(Reservation::class)
+            ->where('status', 'confirmee')
+            ->whereDate('check_in_date', '>', now())
+            ->orderBy('check_in_date', 'asc');
+    }
+
     public function statusHistory(): HasMany
     {
         return $this->hasMany(RoomStatusHistory::class)->orderBy('changed_at', 'desc');

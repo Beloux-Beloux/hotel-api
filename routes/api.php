@@ -89,6 +89,8 @@ Route::middleware('auth:sanctum')->group(function () {
             ->middleware('permission:reservations.edit');
         Route::post('/reservations/{reservation}/check-in', [\App\Http\Controllers\Api\ReservationController::class, 'checkIn'])
             ->middleware('permission:reservations.edit');
+        Route::post('/reservations/{reservation}/no-show', [\App\Http\Controllers\Api\ReservationController::class, 'markAsNoShow'])
+            ->middleware('permission:reservations.edit');
         Route::post('/reservations/{reservation}/archive', [\App\Http\Controllers\Api\ReservationController::class, 'archive'])
             ->middleware('permission:reservations.edit');
         Route::post('/reservations/{reservation}/unarchive', [\App\Http\Controllers\Api\ReservationController::class, 'unarchive'])
@@ -109,6 +111,9 @@ Route::middleware('auth:sanctum')->group(function () {
         // Room assignments
         Route::get('/assignments', [\App\Http\Controllers\Api\RoomAssignmentController::class, 'index']);
         Route::post('/assignments/auto-assign', [\App\Http\Controllers\Api\RoomAssignmentController::class, 'autoAssign']);
+        Route::get('/assignments/unassigned-rooms', [\App\Http\Controllers\Api\RoomAssignmentController::class, 'getUnassignedRooms']);
+        Route::post('/assignments/manual-assign', [\App\Http\Controllers\Api\RoomAssignmentController::class, 'manualAssign']);
+        Route::get('/debug/assignments', [\App\Http\Controllers\Api\DebugAssignmentController::class, 'debug']);
         Route::put('/assignments/{assignment}/reassign', [\App\Http\Controllers\Api\RoomAssignmentController::class, 'reassign']);
         Route::post('/assignments/{assignment}/start', [\App\Http\Controllers\Api\RoomAssignmentController::class, 'start']);
         Route::post('/assignments/{assignment}/complete', [\App\Http\Controllers\Api\RoomAssignmentController::class, 'complete']);

@@ -101,6 +101,14 @@ class HotelUserController extends Controller
             return response()->json(['message' => 'Utilisateur non trouvé dans cet hôtel'], 404);
         }
 
+        // Get the user's current role in this hotel
+        $userCurrentRole = $user->hotels()->where('hotels.id', $hotel->id)->first()->pivot->role;
+        
+        // Prevent changing the role of an owner
+        if ($userCurrentRole === 'owner') {
+            return response()->json(['message' => 'Le rôle d\'un propriétaire ne peut pas être modifié'], 403);
+        }
+
         // Update role
         $hotel->users()->updateExistingPivot($user->id, [
             'role' => $request->role,
@@ -129,6 +137,14 @@ class HotelUserController extends Controller
         // Check if user belongs to hotel
         if (!$user->hotels->contains($hotel)) {
             return response()->json(['message' => 'Utilisateur non trouvé dans cet hôtel'], 404);
+        }
+
+        // Get the user's role in this hotel
+        $userRole = $user->hotels()->where('hotels.id', $hotel->id)->first()->pivot->role;
+        
+        // Prevent removing an owner
+        if ($userRole === 'owner') {
+            return response()->json(['message' => 'Un propriétaire ne peut pas être retiré de l\'hôtel'], 403);
         }
 
         // Remove user from hotel

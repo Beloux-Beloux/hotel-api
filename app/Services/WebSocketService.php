@@ -134,6 +134,18 @@ class WebSocketService
     }
 
     /**
+     * Notify assignment cancelled
+     */
+    public function notifyAssignmentCancelled(string $hotelId, string $assignmentId, string $reason): void
+    {
+        $this->broadcast($hotelId, 'assignment_cancelled', [
+            'assignmentId' => $assignmentId,
+            'reason' => $reason,
+            'timestamp' => now()->toISOString(),
+        ]);
+    }
+
+    /**
      * Notify new reservation
      */
     public function notifyNewReservation(string $hotelId, array $reservationData): void

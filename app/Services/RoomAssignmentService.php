@@ -25,11 +25,14 @@ class RoomAssignmentService
     {
         // Get rooms that need cleaning
         $roomsToClean = $this->getRoomsToClean($hotelId);
-        
+        \Log::info('Rooms to clean', ['hotel_id' => $hotelId, 'count' => $roomsToClean->count(), 'rooms' => $roomsToClean->pluck('number')]);
+
         // Get available staff
         $availableStaff = $this->getAvailableStaff($hotelId, $date);
-        
+        \Log::info('Available staff', ['hotel_id' => $hotelId, 'date' => $date->format('Y-m-d'), 'count' => $availableStaff->count(), 'staff' => $availableStaff->pluck('display_name')]);
+
         if ($availableStaff->isEmpty() || $roomsToClean->isEmpty()) {
+            \Log::warning('Auto-assign aborted', ['rooms' => $roomsToClean->count(), 'staff' => $availableStaff->count()]);
             return [
                 'assigned' => 0,
                 'unassigned' => $roomsToClean->count()
@@ -38,13 +41,13 @@ class RoomAssignmentService
 
         // Group rooms by floor
         $roomsByFloor = $roomsToClean->groupBy('floor');
-        
+
         // Calculate workload per staff
         $totalRooms = $roomsToClean->count();
         $staffCount = $availableStaff->count();
         $baseRoomsPerStaff = intval($totalRooms / $staffCount);
         $remainingRooms = $totalRooms % $staffCount;
-        
+
         // Initialize staff workload
         $staffWorkload = [];
         foreach ($availableStaff as $staff) {
@@ -55,11 +58,11 @@ class RoomAssignmentService
                 'floors' => []
             ];
         }
-        
+
         DB::beginTransaction();
         try {
             $assignedCount = 0;
-            
+
             // Assign rooms by floor preference
             foreach ($roomsByFloor as $floor => $rooms) {
                 // Find staff with preference for this floor
@@ -68,16 +71,16 @@ class RoomAssignmentService
                 })->sortBy(function ($staff) use ($staffWorkload) {
                     return $staffWorkload[$staff->id]['assigned'];
                 });
-                
+
                 // If no preferred staff, use any available staff
                 if ($preferredStaff->isEmpty()) {
                     $preferredStaff = collect($staffWorkload)->sortBy('assigned')->pluck('staff');
                 }
-                
+
                 // Assign rooms to staff
                 foreach ($rooms as $room) {
                     $assigned = false;
-                    
+
                     foreach ($preferredStaff as $staff) {
                         if ($staffWorkload[$staff->id]['assigned'] < $staffWorkload[$staff->id]['max']) {
                             $this->assignRoom($room, $staff, $date);
@@ -88,7 +91,7 @@ class RoomAssignmentService
                             break;
                         }
                     }
-                    
+
                     if (!$assigned) {
                         // Find any staff with capacity
                         foreach ($staffWorkload as $staffId => $workload) {
@@ -103,12 +106,12 @@ class RoomAssignmentService
                     }
                 }
             }
-            
+
             DB::commit();
-            
+
             // Notify via WebSocket
             $this->websocket->notifyAssignmentsUpdated($hotelId, $date);
-            
+
             return [
                 'assigned' => $assignedCount,
                 'unassigned' => $totalRooms - $assignedCount,
@@ -120,7 +123,6 @@ class RoomAssignmentService
                     ];
                 })->values()
             ];
-            
         } catch (\Exception $e) {
             DB::rollback();
             throw $e;
@@ -148,15 +150,30 @@ class RoomAssignmentService
      */
     protected function getAvailableStaff($hotelId, Carbon $date)
     {
-        return HousekeepingStaff::where('hotel_id', $hotelId)
+        // Get all active staff for the hotel
+        $allStaff = HousekeepingStaff::where('hotel_id', $hotelId)
             ->where('active', true)
-            ->whereDoesntHave('assignments', function ($query) use ($date) {
-                $query->where('assigned_date', $date)
-                    ->selectRaw('staff_id, COUNT(*) as count')
-                    ->groupBy('staff_id')
-                    ->havingRaw('count >= ?', [DB::raw('housekeeping_staff.max_rooms_per_day')]);
-            })
             ->get();
+
+        // Filter out staff that have reached their max capacity
+        $availableStaff = $allStaff->filter(function ($staff) use ($date, $hotelId) {
+            $assignedCount = DB::table('room_assignments')
+                ->where('assigned_date', $date)
+                ->where('hotel_id', $hotelId)
+                ->where('staff_id', $staff->id)
+                ->whereNotIn('status', ['cancelled'])
+                ->count();
+
+            return $assignedCount < $staff->max_rooms_per_day;
+        });
+
+        \Log::info('Staff availability check', [
+            'total_active_staff' => $allStaff->count(),
+            'available_staff' => $availableStaff->count(),
+            'date' => $date->format('Y-m-d')
+        ]);
+
+        return $availableStaff;
     }
 
     /**

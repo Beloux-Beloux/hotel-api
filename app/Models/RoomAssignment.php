@@ -28,6 +28,9 @@ class RoomAssignment extends Model
         'completed_at',
         'validated_at',
         'validated_by',
+        'cancelled_at',
+        'cancelled_by',
+        'cancellation_reason',
         'status',
         'duration_minutes',
         'checklist_completed',
@@ -40,6 +43,7 @@ class RoomAssignment extends Model
         'started_at' => 'datetime',
         'completed_at' => 'datetime',
         'validated_at' => 'datetime',
+        'cancelled_at' => 'datetime',
         'checklist_completed' => 'array',
         'duration_minutes' => 'integer'
     ];

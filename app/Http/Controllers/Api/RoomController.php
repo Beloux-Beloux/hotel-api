@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Room;
 use App\Models\RoomNote;
+use App\Models\RoomAssignment;
 use Illuminate\Http\Request;
 use App\Services\WebSocketService;
 
@@ -21,7 +22,7 @@ class RoomController extends Controller
      */
     public function index(Request $request)
     {
-        $query = Room::with(['roomType', 'currentReservation.guest']);
+        $query = Room::with(['roomType', 'currentReservation.guest', 'nextReservation.guest']);
 
         // Filter by status
         if ($request->has('status')) {
@@ -65,7 +66,7 @@ class RoomController extends Controller
             'notes' => $request->notes,
         ]);
 
-        $room->load(['roomType', 'currentReservation.guest']);
+        $room->load(['roomType', 'currentReservation.guest', 'nextReservation.guest']);
 
         return response()->json($room, 201);
     }
@@ -75,7 +76,7 @@ class RoomController extends Controller
      */
     public function show(Room $room)
     {
-        $room->load(['roomType', 'currentReservation.guest']);
+        $room->load(['roomType', 'currentReservation.guest', 'nextReservation.guest']);
 
         return response()->json($room);
     }
@@ -90,10 +91,55 @@ class RoomController extends Controller
             'notes' => 'sometimes|nullable|string',
         ]);
 
+        $oldStatus = $room->status;
+        $newStatus = $request->status ?? $oldStatus;
+
+        // Mettre à jour la chambre
         $room->update($request->only(['status', 'notes']));
+
+        // Si la chambre passe d'un statut "sale" à un statut "non sale"
+        $dirtyStatuses = [Room::STATUS_LIBRE_SALE, Room::STATUS_OCCUPEE_SALE];
+        $wasCleaningNeeded = in_array($oldStatus, $dirtyStatuses);
+        $isCleaningNotNeeded = !in_array($newStatus, $dirtyStatuses);
+
+        if ($wasCleaningNeeded && $isCleaningNotNeeded && $oldStatus !== $newStatus) {
+            // Retirer toute attribution active pour cette chambre
+            $activeAssignment = RoomAssignment::where('room_id', $room->id)
+                ->whereIn('status', ['pending', 'in_progress'])
+                ->whereDate('assigned_date', today())
+                ->first();
+
+            if ($activeAssignment) {
+                $activeAssignment->update([
+                    'status' => 'cancelled',
+                    'cancelled_at' => now(),
+                    'cancelled_by' => auth()->id(),
+                    'cancellation_reason' => 'Chambre marquée comme propre'
+                ]);
+
+                // Log de l'action
+                \Log::info('Room assignment cancelled due to status change', [
+                    'room_id' => $room->id,
+                    'room_number' => $room->number,
+                    'old_status' => $oldStatus,
+                    'new_status' => $newStatus,
+                    'assignment_id' => $activeAssignment->id,
+                    'staff_id' => $activeAssignment->staff_id
+                ]);
+
+                // Notifier via WebSocket si nécessaire
+                if ($this->websocket) {
+                    $this->websocket->notifyAssignmentCancelled(
+                        $room->hotel_id,
+                        $activeAssignment->id,
+                        'Chambre marquée comme propre'
+                    );
+                }
+            }
+        }
         
         // Recharger les relations après la mise à jour
-        $room->load(['roomType', 'currentReservation.guest']);
+        $room->load(['roomType', 'currentReservation.guest', 'nextReservation.guest']);
 
         return response()->json($room);
     }

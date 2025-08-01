@@ -253,6 +253,65 @@ class ReservationController extends Controller
     }
 
     /**
+     * Mark a reservation as no show.
+     */
+    public function markAsNoShow(Reservation $reservation)
+    {
+        // Only confirmed reservations can be marked as no show
+        if ($reservation->status !== Reservation::STATUS_CONFIRMEE) {
+            return response()->json([
+                'message' => 'Seules les réservations confirmées peuvent être marquées comme no show.',
+            ], 422);
+        }
+
+        // Check if check-in date has passed
+        if (!$reservation->check_in_date->isPast() && !$reservation->check_in_date->isToday()) {
+            return response()->json([
+                'message' => 'La date d\'arrivée n\'est pas encore passée.',
+            ], 422);
+        }
+
+        DB::beginTransaction();
+        try {
+            $oldStatus = $reservation->status;
+            
+            // Update reservation status
+            $reservation->update(['status' => Reservation::STATUS_NO_SHOW]);
+
+            // Log the no show
+            ReservationAudit::logAction(
+                $reservation, 
+                'marked_as_no_show',
+                ['status' => $oldStatus],
+                ['status' => Reservation::STATUS_NO_SHOW]
+            );
+
+            // Update room status if it was reserved
+            if ($reservation->room && $reservation->room->status === 'reservee') {
+                // Determine the appropriate room status
+                // If room was previously clean, keep it clean; otherwise mark as dirty
+                $newRoomStatus = 'libre_sale'; // Default to dirty, can be adjusted based on business logic
+                $reservation->room->update(['status' => $newRoomStatus]);
+            }
+
+            DB::commit();
+
+            $reservation->load(['guest', 'room.roomType']);
+
+            return response()->json([
+                'message' => 'Réservation marquée comme no show avec succès.',
+                'reservation' => $reservation,
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'message' => 'Erreur lors du marquage de la réservation comme no show.',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
      * Archive a reservation.
      */
     public function archive(Reservation $reservation)

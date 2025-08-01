@@ -15,10 +15,7 @@ class HousekeepingStaff extends Model
         'hotel_id',
         'user_id',
         'code',
-        'first_name',
-        'last_name',
         'phone',
-        'email',
         'hourly_rate',
         'hire_date',
         'floor_preferences',
@@ -40,6 +37,8 @@ class HousekeepingStaff extends Model
         'active' => true,
         'max_rooms_per_day' => 15
     ];
+
+    protected $appends = ['display_name', 'email'];
 
     protected static function booted()
     {
@@ -106,10 +105,14 @@ class HousekeepingStaff extends Model
      */
     public function getDisplayNameAttribute()
     {
-        if ($this->first_name && $this->last_name) {
-            return "{$this->first_name} {$this->last_name}";
-        }
-        
         return $this->user ? $this->user->name : $this->code;
+    }
+    
+    /**
+     * Get email through user relationship
+     */
+    public function getEmailAttribute()
+    {
+        return $this->user ? $this->user->email : null;
     }
 }

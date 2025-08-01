@@ -5,10 +5,12 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\RoomAssignment;
 use App\Models\HousekeepingStaff;
+use App\Models\Room;
 use App\Services\RoomAssignmentService;
 use App\Services\WebSocketService;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\DB;
 
 class RoomAssignmentController extends Controller
 {
@@ -34,7 +36,7 @@ class RoomAssignmentController extends Controller
             ? Carbon::parse($request->date)
             : today();
 
-        $hotelId = session('hotel_id');
+        $hotelId = auth()->user()->current_hotel_id;
         $assignments = $this->assignmentService->getAssignmentsForDate($hotelId, $date);
 
         return response()->json([
@@ -53,7 +55,19 @@ class RoomAssignmentController extends Controller
         ]);
 
         $date = Carbon::parse($request->date);
-        $hotelId = session('hotel_id');
+        $hotelId = auth()->user()->current_hotel_id;
+        
+        \Log::info('Auto-assign request', [
+            'hotel_id' => $hotelId,
+            'date' => $date->format('Y-m-d'),
+            'user' => auth()->user()->id
+        ]);
+
+        if (!$hotelId) {
+            return response()->json([
+                'message' => 'Aucun hôtel sélectionné'
+            ], 422);
+        }
 
         $result = $this->assignmentService->autoAssign($hotelId, $date);
 
@@ -202,6 +216,137 @@ class RoomAssignmentController extends Controller
                 'validated' => $assignments->where('status', RoomAssignment::STATUS_VALIDATED)->count(),
             ]
         ]);
+    }
+
+    /**
+     * Get unassigned rooms for a date.
+     */
+    public function getUnassignedRooms(Request $request)
+    {
+        $request->validate([
+            'date' => 'required|date'
+        ]);
+
+        $date = Carbon::parse($request->date);
+        $hotelId = auth()->user()->current_hotel_id;
+
+        // Get dirty rooms
+        $dirtyRooms = Room::where('hotel_id', $hotelId)
+            ->whereIn('status', ['libre_sale', 'occupee_sale'])
+            ->get();
+
+        // Get assigned room IDs for this date
+        $assignedRoomIds = RoomAssignment::where('hotel_id', $hotelId)
+            ->where('assigned_date', $date)
+            ->whereNotIn('status', ['cancelled'])
+            ->pluck('room_id');
+
+        // Filter unassigned rooms
+        $unassignedRooms = $dirtyRooms->whereNotIn('id', $assignedRoomIds)
+            ->values()
+            ->map(function ($room) {
+                return [
+                    'id' => $room->id,
+                    'number' => $room->number,
+                    'floor' => $room->floor,
+                    'status' => $room->status,
+                    'room_type' => $room->roomType->name
+                ];
+            });
+
+        return response()->json([
+            'date' => $date->format('Y-m-d'),
+            'unassigned_rooms' => $unassignedRooms
+        ]);
+    }
+
+    /**
+     * Manually assign rooms to staff.
+     */
+    public function manualAssign(Request $request)
+    {
+        $request->validate([
+            'date' => 'required|date',
+            'staff_id' => 'required|exists:housekeeping_staff,id',
+            'room_ids' => 'required|array',
+            'room_ids.*' => 'exists:rooms,id'
+        ]);
+
+        $date = Carbon::parse($request->date);
+        $hotelId = auth()->user()->current_hotel_id;
+        $staff = HousekeepingStaff::findOrFail($request->staff_id);
+
+        // Check if staff belongs to the hotel
+        if ($staff->hotel_id !== $hotelId) {
+            return response()->json([
+                'message' => 'Personnel non trouvé dans cet hôtel'
+            ], 404);
+        }
+
+        // Check staff capacity
+        $currentAssignments = RoomAssignment::where('hotel_id', $hotelId)
+            ->where('staff_id', $staff->id)
+            ->where('assigned_date', $date)
+            ->whereNotIn('status', ['cancelled'])
+            ->count();
+
+        $newAssignmentsCount = count($request->room_ids);
+        $totalAssignments = $currentAssignments + $newAssignmentsCount;
+
+        if ($totalAssignments > $staff->max_rooms_per_day) {
+            return response()->json([
+                'message' => "Ce membre du personnel ne peut pas accepter {$newAssignmentsCount} chambres supplémentaires. Capacité restante: " . ($staff->max_rooms_per_day - $currentAssignments)
+            ], 422);
+        }
+
+        DB::beginTransaction();
+        try {
+            $assigned = [];
+            
+            foreach ($request->room_ids as $roomId) {
+                $room = Room::findOrFail($roomId);
+                
+                // Check if room is already assigned
+                $existingAssignment = RoomAssignment::where('hotel_id', $hotelId)
+                    ->where('room_id', $roomId)
+                    ->where('assigned_date', $date)
+                    ->whereNotIn('status', ['cancelled'])
+                    ->first();
+                    
+                if ($existingAssignment) {
+                    continue;
+                }
+                
+                // Create assignment
+                $assignment = RoomAssignment::create([
+                    'hotel_id' => $hotelId,
+                    'room_id' => $roomId,
+                    'staff_id' => $staff->id,
+                    'assigned_date' => $date,
+                    'assigned_at' => now(),
+                    'status' => RoomAssignment::STATUS_PENDING
+                ]);
+                
+                $assigned[] = $assignment;
+            }
+
+            DB::commit();
+
+            // Notify via WebSocket
+            if (count($assigned) > 0) {
+                $this->websocket->notifyAssignmentsUpdated($hotelId, $date);
+            }
+
+            return response()->json([
+                'message' => count($assigned) . ' chambres attribuées avec succès',
+                'assigned_count' => count($assigned)
+            ]);
+        } catch (\Exception $e) {
+            DB::rollback();
+            return response()->json([
+                'message' => 'Erreur lors de l\'attribution des chambres'
+            ], 500);
+        }
     }
 
     /**
