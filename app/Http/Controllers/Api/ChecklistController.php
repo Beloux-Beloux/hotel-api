@@ -90,32 +90,53 @@ class ChecklistController extends Controller
         ]);
     }
     public function uploadPhoto(Request $request, $assignmentId, $itemId)
+{
+    $checklist = HousekeepingChecklist::where('assignment_id', $assignmentId)->first();
+    if(!$checklist)
     {
-        $checklist = HousekeepingChecklist::where('assignment_id', $assignmentId)->first();
-        if(!$checklist)
-        {
-            return response()->json(['error' => 'Aucune photo reçue'], 400);
-        }
-
-        $file = $request->file('photo');
-
-        $path = $file->store('checklists', 'public');
-
-        $items = $checklist->items;
-
-        foreach($items as $item)
-        {
-            if($item['id'] == $itemId)
-            {
-                $item['photo'] = '/storage/'. $path;
-            }
-        }
-
-        $checklist->items = $items;
-        $checklist->save();
-
-        return response()->json(['url' => url('/storage/'. $path)]);
+        return response()->json(['error' => 'Aucune checklist trouvée'], 400);
     }
+
+    $file = $request->file('photo');
+    if (!$file) {
+        return response()->json(['error' => 'Aucune photo reçue'], 400);
+    }
+
+    $path = $file->store('checklists', 'public');
+
+    $items = $checklist->items;
+    
+    // Si items est une chaîne JSON, le décoder
+    if (is_string($items)) {
+        $items = json_decode($items, true);
+    }
+    
+    // Parcourir avec référence pour modifier l'original
+    foreach($items as &$item) {
+        if($item['id'] == $itemId) {
+            $item['photo'] = '/storage/'. $path;
+        }
+    }
+
+    $checklist->items = $items;
+    $checklist->save();
+
+    // Retourner l'URL complète
+    $fullUrl = url('/storage/' . $path);
+    
+    Log::info('Photo uploaded', [
+        'assignment_id' => $assignmentId,
+        'item_id' => $itemId,
+        'path' => $path,
+        'url' => $fullUrl
+    ]);
+
+    return response()->json([
+        'success' => true,
+        'url' => $fullUrl,
+        'path' => '/storage/' . $path
+    ]);
+}
 
     public function updateItem(Request $request, $assignmentId, $itemId)
     {

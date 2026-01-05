@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\HousekeepingChecklist;
 use App\Models\RoomAssignment;
 use App\Models\HousekeepingStaff;
 use App\Models\Room;
@@ -11,6 +12,13 @@ use App\Services\WebSocketService;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
+use App\Services\WhatsAppService;
+use App\Models\Issue;
+use App\Services\NotificationService;
+use Illuminate\Support\Facades\Log; 
+use App\Events\NewAssignmentEvent;
+use App\Events\RoomValidatedEvent;
+use App\Events\IssueReportedEvent;
 
 class RoomAssignmentController extends Controller
 {
@@ -32,18 +40,145 @@ class RoomAssignmentController extends Controller
             'date' => 'sometimes|date'
         ]);
 
-        $date = $request->has('date') 
-            ? Carbon::parse($request->date)
-            : today();
-
         $hotelId = auth()->user()->current_hotel_id;
-        $assignments = $this->assignmentService->getAssignmentsForDate($hotelId, $date);
 
+        if ($request->has('date')) {
+            $date = Carbon::parse($request->date);
+            $assignments = $this->assignmentService->getAssignmentsForDate($hotelId, $date);
+            $assignments = $this->enrichAssignmentsWithPhotos($assignments);
+            
+            // Log pour déboguer
+            \Log::info('Assignments with photos:', [
+                'date' => $date,
+                'assignments_count' => $assignments->count(),
+                'first_assignment_photos' => $assignments->first()?->first()?->photos ?? []
+            ]);
+            
+            return response()->json([
+                'date' => $date->format('Y-m-d'),
+                'assignments' => $assignments,
+            ]);
+        }
+
+        $assignments = $this->assignmentService->getAllAssignments($hotelId);
+        $assignments = $this->enrichAssignmentsWithPhotos($assignments);
+        
+        \Log::info('All assignments with photos:', [
+            'assignments_count' => $assignments->count(),
+            'first_assignment_photos' => $assignments->first()?->first()?->photos ?? []
+        ]);
+        
         return response()->json([
-            'date' => $date->format('Y-m-d'),
-            'assignments' => $assignments
+            'assignments' => $assignments,
         ]);
     }
+
+    public function getAllAssignments($hotelId)
+    {
+        return RoomAssignment::with(['room.roomType', 'staff.user', 'checklist'])
+            ->where('hotel_id', $hotelId)
+            ->orderBy('staff_id')
+            ->orderBy('assigned_at')
+            ->get()
+            ->groupBy('staff_id');
+    }
+
+    // Nouvelle méthode pour enrichir les assignments avec les photos
+    private function enrichAssignmentsWithPhotos($assignments)
+    {
+        return $assignments->map(function ($staffAssignments) {
+            return $staffAssignments->map(function ($assignment) {
+                $photos = [];
+                
+                // Récupérer les photos du checklist si disponible
+                if ($assignment->checklist && isset($assignment->checklist->items)) {
+                    $items = $assignment->checklist->items;
+                    
+                    // Si items est un tableau JSON, le décoder
+                    if (is_string($items)) {
+                        $items = json_decode($items, true);
+                    }
+                    
+                    if (is_array($items)) {
+                        foreach ($items as $item) {
+                            if (!empty($item['photo'])) {
+                                // Construire l'URL complète de la photo
+                                $photoUrl = $item['photo'];
+                                if (!str_starts_with($photoUrl, 'http')) {
+                                    $photoUrl = url($photoUrl);
+                                }
+                                
+                                $photos[] = [
+                                    'id' => $item['id'] ?? uniqid(),
+                                    'url' => $photoUrl,
+                                    'thumbnail_url' => $photoUrl,
+                                    'created_at' => $assignment->checklist->updated_at ?? $assignment->updated_at,
+                                    'type' => 'checklist',
+                                    'item_label' => $item['label'] ?? 'Élément de checklist'
+                                ];
+                            }
+                        }
+                    }
+                }
+                
+                // Ajouter les photos à l'assignment
+                $assignment->photos = $photos;
+                
+                return $assignment;
+            });
+        });
+    }
+
+    // Ou si vous préférez modifier directement la méthode getAssignmentsForDate
+    /*public function getAssignmentsForDate($hotelId, $date)
+    {
+        $assignments = RoomAssignment::with(['room.roomType', 'staff.user', 'checklist'])
+            ->where('hotel_id', $hotelId)
+            ->whereDate('assigned_at', $date)
+            ->orderBy('staff_id')
+            ->orderBy('assigned_at')
+            ->get()
+            ->groupBy('staff_id');
+        
+        // Enrichir avec les photos
+        $assignments = $assignments->map(function ($staffAssignments) {
+            return $staffAssignments->map(function ($assignment) {
+                $photos = [];
+                
+                if ($assignment->checklist && isset($assignment->checklist->items)) {
+                    $items = $assignment->checklist->items;
+                    
+                    if (is_string($items)) {
+                        $items = json_decode($items, true);
+                    }
+                    
+                    if (is_array($items)) {
+                        foreach ($items as $item) {
+                            if (!empty($item['photo'])) {
+                                $photoUrl = $item['photo'];
+                                if (!str_starts_with($photoUrl, 'http')) {
+                                    $photoUrl = url($photoUrl);
+                                }
+                                
+                                $photos[] = [
+                                    'id' => $item['id'] ?? uniqid(),
+                                    'url' => $photoUrl,
+                                    'thumbnail_url' => $photoUrl,
+                                    'created_at' => $assignment->checklist->updated_at ?? $assignment->updated_at,
+                                    'type' => 'checklist'
+                                ];
+                            }
+                        }
+                    }
+                }
+                
+                $assignment->photos = $photos;
+                return $assignment;
+            });
+        });
+        
+        return $assignments;
+    }*/
 
     /**
      * Auto-assign rooms for a date.
@@ -57,7 +192,7 @@ class RoomAssignmentController extends Controller
         $date = Carbon::parse($request->date);
         $hotelId = auth()->user()->current_hotel_id;
         
-        \Log::info('Auto-assign request', [
+        Log::info('Auto-assign request', [
             'hotel_id' => $hotelId,
             'date' => $date->format('Y-m-d'),
             'user' => auth()->user()->id
@@ -71,6 +206,12 @@ class RoomAssignmentController extends Controller
 
         $result = $this->assignmentService->autoAssign($hotelId, $date);
 
+        $this->websocket->notifyAssignmentReassigned(
+                $hotelId,
+                1,
+                auth()->user()->id
+            );
+       
         return response()->json([
             'message' => 'Attribution automatique terminée',
             'result' => $result
@@ -91,6 +232,14 @@ class RoomAssignmentController extends Controller
         try {
             $assignment = $this->assignmentService->reassignRoom($assignment, $newStaff);
             
+            // Send notification to staff
+            // Notify via WebSocket
+            $this->websocket->notifyAssignmentReassigned(
+                $assignment->hotel_id,
+                $assignment->id,
+                $newStaff->id
+            );
+
             return response()->json([
                 'message' => 'Chambre réassignée avec succès',
                 'assignment' => $assignment->load(['room', 'staff'])
@@ -135,7 +284,6 @@ class RoomAssignmentController extends Controller
     {
         $request->validate([
             'checklist' => 'sometimes|array',
-            'notes' => 'sometimes|string|max:500'
         ]);
 
         if ($assignment->status !== RoomAssignment::STATUS_IN_PROGRESS) {
@@ -156,9 +304,42 @@ class RoomAssignmentController extends Controller
             RoomAssignment::STATUS_COMPLETED
         );
 
+        // Send congratulations notification
+        $this->websocket->notifyTaskCompletedCongratulations($assignment->hotel_id, [
+            'id' => $assignment->id,
+            'room_number' => $assignment->room->number,
+            'staff_name' => $assignment->staff->display_name,
+        ]);
+
+        $wa = new WhatsAppService();    
+        $wa->sendTemplateWithParams(
+            to: env('WHATSAPP_GOUVERNANTE_PHONE_NUMBER'),
+            templateName: "validation_action",
+            params: [
+                $assignment->id,              // {{1}} -> task_id
+                RoomAssignment::STATUS_COMPLETED,          // {{2}} -> task_status
+                $assignment->staff->display_name,            // {{3}} -> room_number
+                $assignment->room->number        // {{4}} -> staff_name
+            ]
+        );
+
         return response()->json([
             'message' => 'Nettoyage terminé',
             'assignment' => $assignment
+        ]);
+    }
+
+   public function completeChecklist(Request $request, RoomAssignment $assignment)
+    {
+        $validated = $request->validate([
+            'checklist' => 'required|array',
+        ]);
+
+        $assignment->completeChecklist($validated['checklist']);
+
+        return response()->json([
+            'message' => 'Checklist mise à jour',
+            'assignment' => $assignment->fresh()
         ]);
     }
 
@@ -175,6 +356,7 @@ class RoomAssignmentController extends Controller
 
         $assignment->validate(auth()->id());
 
+
         // Notify via WebSocket
         $this->websocket->notifyAssignmentStatusChanged(
             $assignment->hotel_id,
@@ -182,8 +364,46 @@ class RoomAssignmentController extends Controller
             RoomAssignment::STATUS_VALIDATED
         );
 
+        $room = Room::find($assignment->room_id);
+
+        $staff = $assignment->staff->staff_id ? HousekeepingStaff::find($assignment->staff->staff_id) : null;
+        
+        event(new RoomValidatedEvent(
+            $room,
+            auth()->user(),
+            $staff,
+            RoomAssignment::STATUS_VALIDATED,
+            $assignment->notes,
+            now()->getTimestamp()
+        ));
+
         return response()->json([
             'message' => 'Nettoyage validé',
+            'assignment' => $assignment
+        ]);
+    }
+
+    /**
+     * Cancelled assignment
+     */
+
+    public function cancel(Request $request, RoomAssignment $assignment)
+    {
+        $request->validate([
+            'reason' => 'sometimes|string|max:500',
+        ]);
+        $reason = $request->input('reason', null);
+    
+        $assignment->cancel($reason);
+        
+        // Notify via WebSocket
+        $this->websocket->notifyAssignmentStatusChanged(
+            $assignment->hotel_id,
+            $assignment->id,
+            RoomAssignment::STATUS_CANCELLED
+        );
+        return response()->json([
+            'message' => 'Tâche annulée',
             'assignment' => $assignment
         ]);
     }
@@ -302,9 +522,11 @@ class RoomAssignmentController extends Controller
         DB::beginTransaction();
         try {
             $assigned = [];
+            $roomsData = [];
             
             foreach ($request->room_ids as $roomId) {
                 $room = Room::findOrFail($roomId);
+
                 
                 // Check if room is already assigned
                 $existingAssignment = RoomAssignment::where('hotel_id', $hotelId)
@@ -328,14 +550,17 @@ class RoomAssignmentController extends Controller
                 ]);
                 
                 $assigned[] = $assignment;
+                $roomsData[] = [
+                    'room' => $room,
+                    'assignment' => $assignment
+                ];
+                
             }
 
             DB::commit();
 
-            // Notify via WebSocket
-            if (count($assigned) > 0) {
-                $this->websocket->notifyAssignmentsUpdated($hotelId, $date);
-            }
+            
+            event(new NewAssignmentEvent($assignment, $staff, $room, auth()->id()));
 
             return response()->json([
                 'message' => count($assigned) . ' chambres attribuées avec succès',
@@ -374,16 +599,190 @@ class RoomAssignmentController extends Controller
             'created_by' => auth()->id()
         ]);
 
-        // Notify via WebSocket
-        $this->websocket->notifyRoomIssueReported(
-            $assignment->hotel_id,
-            $assignment->room_id,
-            $request->issue
-        );
+        
+        $roomNumber = $request->roomNumber;
+        $title = "Problème signalé dans la chambre $roomNumber";
+        $issue = Issue::create([
+            'title' => $title,
+            'description' => $request->issue,
+            'room' => $roomNumber,
+            'reported_by' => auth()->user()->id
+        ]);
+
+        $room = Room::where('number', $assignment->room->number)->first();
+
+
+        event(new IssueReportedEvent($issue, $room, $request->issue));
+
 
         return response()->json([
             'message' => 'Problème signalé',
             'assignment' => $assignment
         ]);
     }
+
+    public function getAssignmentsByMonth(Request $request)
+    {
+        try {
+            $month = $request->query('month');
+
+            if (!$month) {
+                return response()->json(['error' => 'Le paramètre "month" est requis'], 400);
+            }
+
+            $year = substr($month, 0, 4);
+            $monthNum = substr($month, 5, 2);
+
+            $assignments = RoomAssignment::with(['staff', 'room.roomType'])
+                ->whereYear('assigned_date', $year)
+                ->whereMonth('assigned_date', $monthNum)
+                ->get();
+
+            if ($assignments->isEmpty()) {
+                return response()->json([
+                    'message' => 'Aucune assignation trouvée pour ce mois',
+                    'assignments' => [],
+                ], 200);
+            }
+
+            // ✅ Si le front demande une version "groupée" par date
+            if ($request->query('grouped') === 'true') {
+                $grouped = $assignments->groupBy(function ($item) {
+                    return $item->assigned_date->format('Y-m-d');
+                });
+
+                return response()->json([
+                    'assignments' => $grouped
+                ]);
+            }
+
+            // ✅ Par défaut : retourne un tableau plat
+            return response()->json([
+                'assignments' => $assignments->values()
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Erreur lors du chargement des assignations',
+                'details' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+
+    public function show($id)
+    {
+        $assignment = RoomAssignment::with(['staff', 'room.roomType'])
+            ->findOrFail($id);
+
+        return response()->json([
+            'id' => $assignment->id,
+            'roomNumber' => $assignment->room->number,
+            'roomTypeId' => $assignment->room->roomType->id ?? null,
+            'roomTypeName' => $assignment->room->roomType->name ?? null,
+            'status' => $assignment->status,
+            'staffName' => $assignment->staff->display_name ?? 'Non assigné'
+        ]);
+    }
+
+    public function update(Request $request, $id)
+    {
+        $assignment = RoomAssignment::findOrFail($id);
+        $status = $request->input('status');
+        $assignment->update(['status' => $status]);
+
+        return response()->json(['message' => "Statut mis à jour en $status"]);
+    }
+
+    public function history(Request $request)
+    {
+        $query = RoomAssignment::with(['staff', 'room.roomType'])
+            ->when($request->search, fn($q, $search) =>
+                $q->whereHas('staff', fn($s) => $s->where('display_name', 'like', "%$search%"))
+                ->orWhereHas('room', fn($r) => $r->where('number', 'like', "%$search%"))
+            )
+            ->when($request->status, fn($q, $status) => $q->where('status', $status))
+            ->when($request->date, fn($q, $date) => $q->whereDate('assigned_at', $date))
+            ->orderBy($request->sort_by ?? 'assigned_at', $request->sort_direction ?? 'desc');
+
+        $assignments = $query->paginate($request->per_page ?? 10);
+
+        return response()->json([
+            'data' => $assignments->items(),
+            'meta' => [
+                'current_page' => $assignments->currentPage(),
+                'last_page' => $assignments->lastPage(),
+                'total' => $assignments->total(),
+                'per_page' => $assignments->perPage()
+            ]
+        ]);
+    }
+
+    public function unassignRoom(Request $request)
+    {
+        $validated = $request->validate([
+            'staff_id' => 'required|uuid',
+            'room_id' => 'required|integer',
+        ]);
+
+        $assignment = RoomAssignment::where('staff_id', $validated['staff_id'])
+            ->where('room_id', $validated['room_id'])
+            ->whereNull('completed_at')
+            ->first();
+
+        if (!$assignment) {
+            return response()->json(['success' => false, 'message' => 'Aucune attribution trouvée'], 404);
+        }
+
+        $assignment->delete();
+
+        return response()->json(['success' => true, 'message' => 'Chambre désassignée avec succès']);
+    }
+
+    /**
+     * Delete a room assignment.
+     */    
+    public function destroy(string $id)
+    {
+        try {
+            $assignment = RoomAssignment::find($id);
+
+            if (!$assignment) {
+                return response()->json(['message' => 'Assignation non trouvée'], 404);
+            }
+
+            // Vérifie que l'utilisateur a bien accès à l'hôtel concerné
+            $userHotelId = auth()->user()->current_hotel_id;
+            if ($assignment->hotel_id !== $userHotelId) {
+                return response()->json(['message' => 'Accès refusé'], 403);
+            }
+
+            $assignment->delete();
+
+            Log::info('Assignment supprimé', [
+                'id' => $id,
+                'hotel_id' => $assignment->hotel_id,
+                'deleted_by' => auth()->id(),
+            ]);
+
+
+            return response()->json([
+                'message' => 'Assignation supprimée avec succès',
+                'id' => $id,
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error('Erreur suppression assignment', [
+                'id' => $id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => 'Erreur lors de la suppression',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    
+
 }

@@ -8,6 +8,7 @@ use App\Models\HousekeepingStaff;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class RoomAssignmentService
 {
@@ -25,14 +26,14 @@ class RoomAssignmentService
     {
         // Get rooms that need cleaning
         $roomsToClean = $this->getRoomsToClean($hotelId);
-        \Log::info('Rooms to clean', ['hotel_id' => $hotelId, 'count' => $roomsToClean->count(), 'rooms' => $roomsToClean->pluck('number')]);
+        Log::info('Rooms to clean', ['hotel_id' => $hotelId, 'count' => $roomsToClean->count(), 'rooms' => $roomsToClean->pluck('number')]);
 
         // Get available staff
         $availableStaff = $this->getAvailableStaff($hotelId, $date);
-        \Log::info('Available staff', ['hotel_id' => $hotelId, 'date' => $date->format('Y-m-d'), 'count' => $availableStaff->count(), 'staff' => $availableStaff->pluck('display_name')]);
+        Log::info('Available staff', ['hotel_id' => $hotelId, 'date' => $date->format('Y-m-d'), 'count' => $availableStaff->count(), 'staff' => $availableStaff->pluck('display_name')]);
 
         if ($availableStaff->isEmpty() || $roomsToClean->isEmpty()) {
-            \Log::warning('Auto-assign aborted', ['rooms' => $roomsToClean->count(), 'staff' => $availableStaff->count()]);
+            Log::warning('Auto-assign aborted', ['rooms' => $roomsToClean->count(), 'staff' => $availableStaff->count()]);
             return [
                 'assigned' => 0,
                 'unassigned' => $roomsToClean->count()
@@ -167,7 +168,7 @@ class RoomAssignmentService
             return $assignedCount < $staff->max_rooms_per_day;
         });
 
-        \Log::info('Staff availability check', [
+        Log::info('Staff availability check', [
             'total_active_staff' => $allStaff->count(),
             'available_staff' => $availableStaff->count(),
             'date' => $date->format('Y-m-d')
@@ -223,6 +224,16 @@ class RoomAssignmentService
         return RoomAssignment::with(['room.roomType', 'staff.user'])
             ->where('hotel_id', $hotelId)
             ->where('assigned_date', $date)
+            ->orderBy('staff_id')
+            ->orderBy('assigned_at')
+            ->get()
+            ->groupBy('staff_id');
+    }
+
+    public function getAllAssignments($hotelId)
+    {
+        return RoomAssignment::with(['room.roomType', 'staff.user'])
+            ->where('hotel_id', $hotelId)
             ->orderBy('staff_id')
             ->orderBy('assigned_at')
             ->get()

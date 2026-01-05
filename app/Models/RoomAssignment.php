@@ -1,7 +1,5 @@
 <?php
-
 namespace App\Models;
-
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -126,10 +124,15 @@ class RoomAssignment extends Model
     /**
      * Cancel the assignment.
      */
-    public function cancel()
+    
+
+    public function cancel($reason = null)
     {
         $this->update([
-            'status' => self::STATUS_CANCELLED
+            'status' => self::STATUS_CANCELLED,
+            'cancelled_at' => now(),
+            'cancelled_by' => auth()->id(),
+            'cancellation_reason' => $reason,
         ]);
     }
 
@@ -149,9 +152,8 @@ class RoomAssignment extends Model
         return $labels[$this->status] ?? $this->status;
     }
 
-    /**
-     * Get status color.
-     */
+    
+    
     public function getStatusColorAttribute()
     {
         $colors = [
@@ -164,4 +166,68 @@ class RoomAssignment extends Model
 
         return $colors[$this->status] ?? 'gray';
     }
+
+    /**
+     * Checklist associée à cette tâche.
+     */
+    public function checklist()
+    {
+        return $this->hasOne(HousekeepingChecklist::class, 'assignment_id');
+    }
+
+
+    protected static function booted()
+    {
+        static::created(function ($assignment) {
+            // Créer la checklist seulement si elle n'existe pas déjà
+            if (!$assignment->checklist) {
+                HousekeepingChecklist::create([
+                    'assignment_id' => $assignment->id,
+                    'items' => ChecklistTemplate::getDefaultItems(),
+                    'progress' => 0,
+                    'estimated_minutes' => 30,
+                ]);
+            }
+        });
+
+        
+    }
+
+
+    
+    public function task()
+    {
+        return $this->hasOne(RoomAssignment::class, 'room_id', 'room_id')
+                    ->where('staff_id', $this->staff_id)
+                    ->where('assigned_date', $this->assigned_date);
+    }
+
+    public function completeChecklist(array $labels)
+    {
+        // Charger la checklist liée
+        $checklist = $this->checklist()->first();
+
+        if (!$checklist) {
+            throw new \Exception("Checklist introuvable pour cet assignment.");
+        }
+
+        $items = $checklist->items;
+
+        // Marquer comme completed selon les labels reçus
+        foreach ($items as &$item) {
+            $item['completed'] = in_array($item['label'], $labels);
+        }
+
+        // Calcul du progrès
+        $completedCount = collect($items)->where('completed', true)->count();
+        $progress = round(($completedCount / count($items)) * 100);
+
+        // Sauvegarde
+        $checklist->items = $items;
+        $checklist->progress = $progress;
+        $checklist->save();
+
+        return $checklist;
+    }
+
 }

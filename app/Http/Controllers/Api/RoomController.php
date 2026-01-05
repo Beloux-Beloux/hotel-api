@@ -8,14 +8,17 @@ use App\Models\RoomNote;
 use App\Models\RoomAssignment;
 use Illuminate\Http\Request;
 use App\Services\WebSocketService;
+use App\Services\PriorityCalculationService;
 
 class RoomController extends Controller
 {
     protected WebSocketService $websocket;
+    protected PriorityCalculationService $priorityCalculationService;
 
-    public function __construct(WebSocketService $websocket)
+    public function __construct(WebSocketService $websocket, PriorityCalculationService $priorityCalculationService)
     {
         $this->websocket = $websocket;
+        $this->priorityCalculationService = $priorityCalculationService;
     }
     /**
      * Display a listing of the resource.
@@ -41,9 +44,30 @@ class RoomController extends Controller
 
         $rooms = $query->orderBy('number')->get();
 
-        return response()->json($rooms);
+        $rooms = $query->orderBy('number')->get();
+
+        $enrichedRooms = $rooms->map(function ($room) {
+            return [
+                ...$room->toArray(),
+                'priority' => $this->priorityCalculationService->computeDynamicPriority($room)
+            ];
+        });
+
+        return response()->json($enrichedRooms); // ← Retourner les chambres enrichi
     }
 
+
+      public function calculatePriority(Room $room)
+    {
+        $priority = $this->priorityCalculationService->computeDynamicPriority($room);
+
+        return response()->json([
+            'room_id' => $room->id,
+            'room_number' => $room->number,
+            'priority' => $priority,
+            'calculated_at' => now()->toISOString()
+        ]);
+    }
     /**
      * Store a newly created resource in storage.
      */
@@ -118,7 +142,7 @@ class RoomController extends Controller
                 ]);
 
                 // Log de l'action
-                \Log::info('Room assignment cancelled due to status change', [
+                Log::info('Room assignment cancelled due to status change', [
                     'room_id' => $room->id,
                     'room_number' => $room->number,
                     'old_status' => $oldStatus,
@@ -296,4 +320,8 @@ class RoomController extends Controller
 
         return response()->json(['message' => 'Note supprimée avec succès']);
     }
+
+
+
+
 }

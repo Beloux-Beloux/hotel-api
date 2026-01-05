@@ -139,4 +139,9 @@ class RoomTypeController extends Controller
             'message' => 'Type de chambre supprimé avec succès.'
         ]);
     }
+    public function getByHotel($hotelId)
+    {
+        $roomTypes = RoomType::where('hotel_id', $hotelId)->get();
+        return response()->json($roomTypes);
+    }
 }

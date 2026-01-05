@@ -247,6 +247,7 @@ class HotelUserController extends Controller
             $emailVerified = !config('mail.default') || config('mail.default') === 'log';
 
             $user = User::create([
+                'current_hotel_id' => $hotel->id,
                 'name' => $request->name,
                 'email' => $request->email,
                 'password' => Hash::make($request->password),
