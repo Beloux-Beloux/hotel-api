@@ -434,6 +434,7 @@ class RoomAssignmentController extends Controller
                 'in_progress' => $assignments->where('status', RoomAssignment::STATUS_IN_PROGRESS)->count(),
                 'completed' => $assignments->where('status', RoomAssignment::STATUS_COMPLETED)->count(),
                 'validated' => $assignments->where('status', RoomAssignment::STATUS_VALIDATED)->count(),
+                'cancelled' => $assignments->where('status', RoomAssignment::STATUS_CANCELLED)->count(),
             ]
         ]);
     }
