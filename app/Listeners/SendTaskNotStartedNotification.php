@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Log;
 use App\Models\RoomAssignment;
 use App\Models\Room;
 
-class SendTaskNotStartedNotification implements ShouldQueue
+class SendTaskNotStartedNotification
 {
     use InteractsWithQueue;
 

@@ -10,7 +10,7 @@ class IssueController extends Controller
 {
     // Liste des problèmes
     public function index() {
-        return Issue::all();
+        return Issue::with('reporter')->get();
     }
 
     // Détail d'un problème

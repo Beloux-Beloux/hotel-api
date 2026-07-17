@@ -10,7 +10,6 @@ use Illuminate\Support\Facades\Log;
 
 class SendAssignmentNotification
 {
-    use InteractsWithQueue;
 
     public $queue = 'notifications';
 
@@ -81,8 +80,6 @@ class SendAssignmentNotification
                 'assignment_id' => $event->assignment->id,
             ]);
             
-            // Relancer l'événement après un délai
-            $this->release(30); // Réessaie après 30 secondes
         }
     }
 }

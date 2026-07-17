@@ -311,7 +311,7 @@ class RoomAssignmentController extends Controller
             'staff_name' => $assignment->staff->display_name,
         ]);
 
-        $wa = new WhatsAppService();    
+        /*$wa = new WhatsAppService();    
         $wa->sendTemplateWithParams(
             to: env('WHATSAPP_GOUVERNANTE_PHONE_NUMBER'),
             templateName: "validation_action",
@@ -321,7 +321,7 @@ class RoomAssignmentController extends Controller
                 $assignment->staff->display_name,            // {{3}} -> room_number
                 $assignment->room->number        // {{4}} -> staff_name
             ]
-        );
+        );*/
 
         return response()->json([
             'message' => 'Nettoyage terminé',
@@ -434,7 +434,6 @@ class RoomAssignmentController extends Controller
                 'in_progress' => $assignments->where('status', RoomAssignment::STATUS_IN_PROGRESS)->count(),
                 'completed' => $assignments->where('status', RoomAssignment::STATUS_COMPLETED)->count(),
                 'validated' => $assignments->where('status', RoomAssignment::STATUS_VALIDATED)->count(),
-                'cancelled' => $assignments->where('status', RoomAssignment::STATUS_CANCELLED)->count(),
             ]
         ]);
     }
@@ -706,7 +705,9 @@ class RoomAssignmentController extends Controller
             ->when($request->date, fn($q, $date) => $q->whereDate('assigned_at', $date))
             ->orderBy($request->sort_by ?? 'assigned_at', $request->sort_direction ?? 'desc');
 
-        $assignments = $query->paginate($request->per_page ?? 10);
+        // Utiliser une valeur élevée pour per_page pour récupérer tous les résultats
+        $perPage = $request->per_page ?? 100; // Augmenter à 100 par exemple
+        $assignments = $query->paginate($perPage);
 
         return response()->json([
             'data' => $assignments->items(),

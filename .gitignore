@@ -22,3 +22,10 @@
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+# Docker
+backend/Dockerfile
+backend/docker-entrypoint.sh
+
+# Production env
+backend/.env.production

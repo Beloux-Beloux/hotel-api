@@ -5,6 +5,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use App\Models\Traits\BelongsToHotel;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Log; 
 
 class RoomAssignment extends Model
 {
@@ -94,7 +95,10 @@ class RoomAssignment extends Model
     public function complete($checklistCompleted = null, $notes = null)
     {
         $startedAt = $this->started_at ?? now();
-        $duration = Carbon::now()->diffInMinutes($startedAt);
+        $duration = $startedAt->diffInMinutes(Carbon::now());
+        Log::info("StartedAt : " . $this->started_at);
+        Log::info("Now : " . Carbon::now());
+        Log::info("Duration : ". $duration);
 
         $this->update([
             'completed_at' => now(),

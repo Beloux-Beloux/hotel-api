@@ -94,16 +94,30 @@ class StaffAbsenceController extends Controller
 
     public function getAllAbsences()
     {
-        // Utiliser eager loading avec les relations
-        $absences = StaffAbsence::with(['staff.user:id,name'])
+        // Eager loading avec toutes les relations nécessaires
+        $absences = StaffAbsence::with([
+                'staff.user:id,name',
+                'approver:id,name' 
+            ])
             ->orderBy('id', 'DESC')
             ->get()
             ->map(function ($absence) {
-                // Ajouter le nom du staff aux données
                 $absence->staff_name = $absence->staff->user->name ?? 'N/A';
+                $approvedName = $absence->approver->name ?? null;
+                $absence->approved_name = $this->formatUserName($approvedName);
                 return $absence;
             });
         
         return response()->json($absences);
+    }
+
+    private function formatUserName(?string $name): ?string
+    {
+        if (empty($name)) {
+            return null;
+        }
+        
+        // Retirer " User" à la fin du nom
+        return preg_replace('/\s+User$/i', '', $name);
     }
 }

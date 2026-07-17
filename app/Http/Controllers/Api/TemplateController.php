@@ -14,6 +14,8 @@ use Illuminate\Validation\Rule;
 use App\Events\AssignmentsUpdated;
 use Illuminate\Support\Facades\Log;
 
+use function Laravel\Prompts\info;
+
 class TemplateController extends Controller
 {
     protected $validDays = [
@@ -128,73 +130,120 @@ class TemplateController extends Controller
      * Application d’un template sur une plage de dates
      */
     public function applyTemplate(Request $request, $id)
-    {
-        $data = $request->validate([
-            'start' => 'required_without:start_date|date',
-            'end' => 'required_without:end_date|date',
-            'start_date' => 'required_without:start|date',
-            'end_date' => 'required_without:end|date',
-        ]);
+{
+    $data = $request->validate([
+        'start' => 'required_without:start_date|date',
+        'end' => 'required_without:end_date|date',
+        'start_date' => 'required_without:start|date',
+        'end_date' => 'required_without:end|date',
+    ]);
 
-        $start = Carbon::parse($data['start'] ?? $data['start_date']);
-        $end = Carbon::parse($data['end'] ?? $data['end_date']);
+    $start = Carbon::parse($data['start'] ?? $data['start_date']);
+    $end = Carbon::parse($data['end'] ?? $data['end_date']);
 
-        if ($start->gt($end)) {
-            return response()->json(['error' => 'La date de début doit être avant la date de fin'], 422);
-        }
+    Log::info('=== APPLY TEMPLATE DEBUG ===');
+    Log::info('Start: ' . $start->toDateString());
+    Log::info('End: ' . $end->toDateString());
+    
+    if ($start->gt($end)) {
+        return response()->json(['error' => 'La date de début doit être avant la date de fin'], 422);
+    }
 
-        $template = Template::with('items')->findOrFail($id);
+    $template = Template::with('items')->findOrFail($id);
+    
+    // LOG CRITIQUE : Voir le contenu réel des items
+    Log::info('Template ID: ' . $template->id);
+    Log::info('Template items count: ' . $template->items->count());
+    
+    foreach ($template->items as $index => $item) {
+        Log::info("Item {$index}: day_of_week = '" . $item->day_of_week . "'");
+        Log::info("Item {$index}: room_id = " . ($item->room_id ?: 'NULL'));
+        Log::info("Item {$index}: staff_id = " . ($item->staff_id ?: 'NULL'));
+    }
 
-        if ($template->items->isEmpty()) {
-            return response()->json(['error' => 'Le template ne contient aucun élément'], 422);
-        }
+    if ($template->items->isEmpty()) {
+        return response()->json(['error' => 'Le template ne contient aucun élément'], 422);
+    }
 
-        $period = new DatePeriod($start, new DateInterval('P1D'), $end->copy()->addDay());
+    $period = new DatePeriod($start, new DateInterval('P1D'), $end->copy()->addDay());
+    
+    // LOG CRITIQUE : Voir les dates du périod
+    $datesArray = [];
+    foreach ($period as $date) {
+        $datesArray[] = $date->format('Y-m-d');
+    }
+    Log::info('Period dates: ' . implode(', ', $datesArray));
+    Log::info('Period count: ' . count($datesArray));
 
-        DB::beginTransaction();
-        try {
-            $createdCount = 0;
+    DB::beginTransaction();
+    try {
+        $createdCount = 0;
 
-            foreach ($period as $date) {
-                $date = Carbon::instance($date); // ✅ Convertir en Carbon
+        foreach ($period as $date) {
+            $date = Carbon::instance($date);
+            $dayOfWeek = strtolower($date->format('l'));
+            $dayOfWeekFrench = strtolower($date->locale('fr')->dayName); // Pour comparaison
+            
+            Log::info('--- Processing date: ' . $date->toDateString() . ' ---');
+            Log::info('Day of week (English): ' . $dayOfWeek);
+            Log::info('Day of week (French): ' . $dayOfWeekFrench);
+            
+            foreach ($template->items as $item) {
+                Log::info('Checking item - DB day_of_week: "' . $item->day_of_week . '" vs Current: "' . $dayOfWeek . '"');
+                
+                // ESSAYEZ CETTE COMPARAISON PLUS FLEXIBLE :
+                $dbDay = strtolower(trim($item->day_of_week));
+                $currentDay = $dayOfWeek;
+                
+                if ($dbDay !== $currentDay) {
+                    Log::info('  → Skipping: days don\'t match');
+                    continue;
+                }
 
-                $dayOfWeek = strtolower($date->format('l'));
+                if (!$item->room_id || !$item->staff_id) {
+                    Log::info('  → Skipping: missing room_id or staff_id');
+                    continue;
+                }
 
-                foreach ($template->items as $item) {
-                    if ($item->day_of_week !== $dayOfWeek) continue;
+                Log::info('  → RoomAssign exists check...');
+                
+                $exists = RoomAssignment::where('room_id', $item->room_id)
+                    ->where('staff_id', $item->staff_id)
+                    ->where('assigned_date', $date->toDateString())
+                    ->exists();
 
-                    if (!$item->room_id || !$item->staff_id) continue;
-
-                    $exists = RoomAssignment::where('room_id', $item->room_id)
-                        ->where('staff_id', $item->staff_id)
-                        ->where('assigned_date', $date->toDateString())
-                        ->exists();
-
-                    if (!$exists) {
-                        RoomAssignment::create([
-                            'hotel_id' => auth()->user()->current_hotel_id,
-                            'room_id' => $item->room_id,
-                            'staff_id' => $item->staff_id,
-                            'assigned_date' => $date->toDateString(),
-                            'status' => RoomAssignment::STATUS_PENDING,
-                        ]);
-                        $createdCount++;
-                    }
+                if (!$exists) {
+                    Log::info('  → Creating assignment');
+                    
+                    RoomAssignment::create([
+                        'hotel_id' => auth()->user()->current_hotel_id ?? 1,
+                        'room_id' => $item->room_id,
+                        'staff_id' => $item->staff_id,
+                        'assigned_date' => $date->toDateString(),
+                        'status' => RoomAssignment::STATUS_PENDING,
+                    ]);
+                    $createdCount++;
+                } else {
+                    Log::info('  → Assignment already exists');
                 }
             }
-
-            DB::commit();
-
-            return response()->json([
-                'message' => 'Template appliqué avec succès ✅',
-                'created' => $createdCount
-            ]);
-        } catch (\Exception $e) {
-            DB::rollBack();
-            Log::error('ApplyTemplate Error: '.$e->getMessage());
-            return response()->json(['error' => 'Erreur interne'], 500);
         }
 
+        DB::commit();
+
+        Log::info('=== FINAL RESULT ===');
+        Log::info('Created assignments: ' . $createdCount);
+        
+        return response()->json([
+            'message' => 'Nombre de template appliqué avec succès : ' . $createdCount,
+            'created' => $createdCount
+        ]);
+    } catch (\Exception $e) {
+        DB::rollBack();
+        Log::error('ApplyTemplate Error: ' . $e->getMessage());
+        Log::error('Stack trace: ' . $e->getTraceAsString());
+        return response()->json(['error' => 'Erreur interne: ' . $e->getMessage()], 500);
     }
+}
 
 }
