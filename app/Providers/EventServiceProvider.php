@@ -4,7 +4,7 @@ namespace App\Providers;
 
 use Illuminate\Foundation\Support\Providers\EventServiceProvider as ServiceProvider;
 use App\Events\NewAssignmentEvent;
-use App\Listeners\SendAssignmentNotification;
+use App\Listeners\SendNotificationAssignment;
 use App\Listeners\BroadcastAssignmentToWebSocket;
 use App\Listeners\SendRoomValidatedNotification;
 use App\Events\RoomValidatedEvent;
@@ -24,7 +24,7 @@ class EventServiceProvider extends ServiceProvider
      */
     protected $listen = [
         NewAssignmentEvent::class => [
-            SendAssignmentNotification::class,
+            SendNotificationAssignment::class,
             BroadcastAssignmentToWebSocket::class,
         ],
 
