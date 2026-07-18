@@ -181,10 +181,10 @@ class HousekeepingReportController extends Controller
                 'Date' => $a->assigned_date->format('Y-m-d'),
                 'Chambre' => $a->room->number ?? 'Inconnu',
                 'Étage' => $a->room->floor ?? 'Inconnu',
-                'Type de chambre' => $a->room->roomType->name ?? 'Inconnu',
+                'Type_de_chambre' => $a->room->roomType->name ?? 'Inconnu',
                 'Personnel' => $a->staff->display_name ?? 'Inconnu',
                 'Statut' => $a->status,
-                'Durée (min)' => $a->duration_minutes,
+                'Durée_min' => $a->duration_minutes,
                 'Notes' => $a->notes ?? '',
             ];
         });
