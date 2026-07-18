@@ -37,7 +37,7 @@ RUN cp .env.example .env || true
 RUN php artisan key:generate --force
 
 # Optimiser Laravel
-RUN php artisan view:cache && php artisan migrate --force
+RUN php artisan view:cache
 
 # Créer le lien storage
 RUN php artisan storage:link --force || true
