@@ -69,6 +69,19 @@ use Illuminate\Support\Facades\App;
 
     Route::post('/webhook/whatsapp', [WhatsAppWebhookController::class, 'receive']);
 
+    Route::get('/debug-env', function () {
+        return response()->json([
+            'DB_HOST' => env('DB_HOST', 'NON_DEFINI'),
+            'DB_PORT' => env('DB_PORT', 'NON_DEFINI'),
+            'DB_DATABASE' => env('DB_DATABASE', 'NON_DEFINI'),
+            'DB_USERNAME' => env('DB_USERNAME', 'NON_DEFINI'),
+            'has_DB_PASSWORD' => env('DB_PASSWORD') ? 'OUI' : 'NON',
+            'APP_KEY' => env('APP_KEY', 'NON_DEFINI'),
+            'APP_DEBUG' => env('APP_DEBUG', 'NON_DEFINI'),
+            '_ENV_keys' => array_keys($_ENV),
+            '_SERVER_keys_containing_DB' => array_values(preg_grep('/DB_/', array_keys($_SERVER))),
+        ]);
+    });
 
 
 
