@@ -42,7 +42,7 @@ return Application::configure(basePath: dirname(__DIR__))
                 }
                 
                 // En développement, afficher plus de détails
-                if (config('app.debug')) {
+                /*if (config('app.debug')) {
                     return response()->json([
                         'message' => $e->getMessage(),
                         'exception' => get_class($e),
@@ -54,6 +54,13 @@ return Application::configure(basePath: dirname(__DIR__))
                 
                 return response()->json([
                     'message' => $message
+                ], $status);*/
+                return response()->json([
+                    'message' => $e->getMessage(),
+                    'exception' => get_class($e),
+                    'file' => $e->getFile(),
+                    'line' => $e->getLine(),
+                    'trace' => $e->getTrace()
                 ], $status);
             }
         });
