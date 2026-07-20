@@ -17,7 +17,9 @@ return Application::configure(basePath: dirname(__DIR__))
             'access.mode' => \App\Http\Middleware\CheckAccessMode::class,
             'ensure.hotel.selected' => \App\Http\Middleware\EnsureHotelSelected::class,
         ]);
-        
+        $middleware->api(prepend: [
+            \Illuminate\Http\Middleware\HandleCors::class,
+        ]);
         $middleware->api(append: [
             \App\Http\Middleware\CheckAccessMode::class,
         ]);
