@@ -30,8 +30,6 @@ COPY . .
 # Installer les dépendances Composer (sans dev pour la production)
 RUN composer install --no-dev --optimize-autoloader --no-interaction
 
-# Copier .env.example en .env (Render injectera les vraies valeurs via les variables d'env)
-RUN cp .env.example .env || true
 
 # Générer la clé d'application
 RUN php artisan key:generate --force
